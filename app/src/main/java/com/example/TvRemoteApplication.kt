@@ -7,7 +7,6 @@ import com.example.network.AdbKeyManager
 import com.example.network.ClientCertStore
 import com.example.network.NetworkAdbClient
 import com.example.network.TvDiscoveryManager
-import com.example.network.TvTextSocketClient
 
 class TvRemoteApplication : Application() {
     val database: AppDatabase by lazy { AppDatabase.getInstance(this) }
@@ -16,5 +15,4 @@ class TvRemoteApplication : Application() {
     val discoveryManager: TvDiscoveryManager by lazy { TvDiscoveryManager(this) }
     val adbKeyManager: AdbKeyManager by lazy { AdbKeyManager(filesDir) }
     val adbClient: NetworkAdbClient by lazy { NetworkAdbClient(adbKeyManager) }
-    val textSocketClient: TvTextSocketClient by lazy { TvTextSocketClient() }
 }

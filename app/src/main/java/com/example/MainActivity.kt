@@ -48,8 +48,7 @@ class MainActivity : ComponentActivity() {
             repository = app.repository,
             certStore = app.certStore,
             discoveryManager = app.discoveryManager,
-            adbClient = app.adbClient,
-            textSocketClient = app.textSocketClient
+            adbClient = app.adbClient
         )
     }
 
@@ -65,10 +64,8 @@ class MainActivity : ComponentActivity() {
 
                 val connectionState by viewModel.connectionState.collectAsStateWithLifecycle()
                 val discoveredTvs by viewModel.discoveredTvs.collectAsStateWithLifecycle()
-                val discoveredTextServers by viewModel.discoveredTextServers.collectAsStateWithLifecycle()
                 val pairedTvs by viewModel.pairedTvs.collectAsStateWithLifecycle()
                 val isScanning by viewModel.isScanning.collectAsStateWithLifecycle()
-                val isScanningTextServers by viewModel.isScanningTextServers.collectAsStateWithLifecycle()
                 val scanError by viewModel.scanError.collectAsStateWithLifecycle()
                 val favoriteApps by viewModel.favoriteApps.collectAsStateWithLifecycle()
                 val recentApps by viewModel.recentApps.collectAsStateWithLifecycle()
@@ -77,10 +74,10 @@ class MainActivity : ComponentActivity() {
                 val maxVolume by viewModel.maxVolume.collectAsStateWithLifecycle()
                 val isMuted by viewModel.isMuted.collectAsStateWithLifecycle()
                 val isKeyboardSheetVisible by viewModel.isKeyboardSheetVisible.collectAsStateWithLifecycle()
+                val imePromptState by viewModel.imePromptState.collectAsStateWithLifecycle()
                 val isTvPickerVisible by viewModel.isTvPickerVisible.collectAsStateWithLifecycle()
                 val isVoiceListening by viewModel.isVoiceListening.collectAsStateWithLifecycle()
                 val snackbarNotice by viewModel.snackbarNotice.collectAsStateWithLifecycle()
-                val textSendState by viewModel.textSendState.collectAsStateWithLifecycle()
                 val adbState by viewModel.adbState.collectAsStateWithLifecycle()
                 val adbStatusDetail by viewModel.adbStatusDetail.collectAsStateWithLifecycle()
 
@@ -262,8 +259,7 @@ class MainActivity : ComponentActivity() {
                             },
                             onForgetTv = viewModel::forgetPairedTv,
                             onToggleHaptic = viewModel::setHapticEnabled,
-                            onToggleAutoKeyboard = viewModel::setAutoShowKeyboard,
-                            onSaveTextSocketConfig = viewModel::setTextSocketConfig
+                            onToggleAutoKeyboard = viewModel::setAutoShowKeyboard
                         )
                     }
                 }
@@ -302,22 +298,11 @@ class MainActivity : ComponentActivity() {
                 if (isKeyboardSheetVisible) {
                     val connected = connectionState as? TvConnectionState.Connected
                     val tvName = connected?.tvName ?: "Android TV"
-                    val (resolvedHost, resolvedPort) = viewModel.resolveTextSocketTarget()
                     KeyboardInputSheet(
                         tvName = tvName,
-                        connectedTvHost = connected?.host,
-                        targetHost = resolvedHost,
-                        targetPort = resolvedPort,
-                        hostOverride = preferences.textSocketHostOverride,
-                        discoveredTextServers = discoveredTextServers,
-                        isScanningTextServers = isScanningTextServers,
-                        textSendState = textSendState,
-                        onSendText = viewModel::sendTcpText,
-                        onClearStatus = viewModel::clearTextSendState,
-                        onUpdateTcpTarget = { hostOverride, port ->
-                            viewModel.setTextSocketConfig(port = port, hostOverride = hostOverride)
-                        },
-                        onRefreshTextServers = viewModel::refreshTextServerDiscovery,
+                        initialText = imePromptState.currentText,
+                        isTvImeVisible = imePromptState.isTvImeVisible,
+                        onSendText = viewModel::sendKeyboardText,
                         onDismiss = viewModel::dismissKeyboardSheet
                     )
                 }

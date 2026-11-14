@@ -1,14 +1,11 @@
 package com.example.ui.components
 
-import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.ExperimentalLayoutApi
-import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -24,15 +21,10 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.Backspace
 import androidx.compose.material.icons.automirrored.rounded.Send
-import androidx.compose.material.icons.rounded.CheckCircle
 import androidx.compose.material.icons.rounded.Close
-import androidx.compose.material.icons.rounded.ErrorOutline
 import androidx.compose.material.icons.rounded.Keyboard
-import androidx.compose.material.icons.rounded.Refresh
-import androidx.compose.material.icons.rounded.Tune
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
-import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -62,62 +54,35 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import com.example.data.model.DiscoveredTextServer
-import com.example.data.model.TextSendState
-import com.example.network.TvTextSocketClient
 import com.example.ui.theme.CharcoalBg
 import com.example.ui.theme.CharcoalBorder
 import com.example.ui.theme.CharcoalSurface
 import com.example.ui.theme.CharcoalSurfaceElevated
 import com.example.ui.theme.CharcoalWell
-import com.example.ui.theme.ErrorCoral
 import com.example.ui.theme.MintGreen
-import com.example.ui.theme.MintGreenContainer
-import com.example.ui.theme.MonoFontFamily
 import com.example.ui.theme.OnMintGreen
 import com.example.ui.theme.TextPrimary
 import com.example.ui.theme.TextSecondary
-import com.example.ui.theme.WarningAmber
 
 /**
- * UTF-8 TCP socket text input sheet for Android TV.
- * Automatically binds to the connected TV's IP address (or NSD / manual override)
- * and transmits single-line UTF-8 text terminated with `\n` so the TV triggers Enter.
+ * Native Android TV v2 remote text input sheet.
+ * Transmits text directly to the TV's IME keyboard using the Android TV Remote v2 protocol
+ * (RemoteImeBatchEdit, insert = 1, start/end cursor synchronization) based on kud/androidtv-remote.
  */
-@OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun KeyboardInputSheet(
     tvName: String,
-    connectedTvHost: String?,
-    targetHost: String?,
-    targetPort: Int,
-    hostOverride: String,
-    discoveredTextServers: List<DiscoveredTextServer>,
-    isScanningTextServers: Boolean,
-    textSendState: TextSendState,
+    initialText: String = "",
+    isTvImeVisible: Boolean = false,
     onSendText: (String) -> Unit,
-    onClearStatus: () -> Unit,
-    onUpdateTcpTarget: (hostOverride: String, port: Int) -> Unit,
-    onRefreshTextServers: () -> Unit,
     onDismiss: () -> Unit
 ) {
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     val focusRequester = remember { FocusRequester() }
 
-    var fieldValue by remember {
-        mutableStateOf(TextFieldValue("", selection = TextRange(0)))
-    }
-    var showTargetEditor by remember { mutableStateOf(false) }
-    var draftHost by remember(hostOverride) { mutableStateOf(hostOverride) }
-    var draftPort by remember(targetPort) { mutableStateOf(targetPort.toString()) }
-    var targetInputError by remember { mutableStateOf<String?>(null) }
-
-    val isSending = textSendState is TextSendState.Sending
-
-    LaunchedEffect(textSendState) {
-        if (textSendState is TextSendState.Success) {
-            fieldValue = TextFieldValue("", selection = TextRange(0))
-        }
+    var fieldValue by remember(initialText) {
+        mutableStateOf(TextFieldValue(initialText, selection = TextRange(initialText.length)))
     }
 
     LaunchedEffect(Unit) {
@@ -125,11 +90,12 @@ fun KeyboardInputSheet(
     }
 
     fun submitCurrentText() {
-        if (isSending) return
         val committed = fieldValue.text.trim()
         if (committed.isEmpty()) return
         fieldValue = fieldValue.copy(composition = null)
         onSendText(committed)
+        fieldValue = TextFieldValue("", selection = TextRange(0))
+        onDismiss()
     }
 
     ModalBottomSheet(
@@ -146,7 +112,7 @@ fun KeyboardInputSheet(
                 .padding(horizontal = 22.dp, vertical = 20.dp)
                 .navigationBarsPadding()
         ) {
-            // Header: Keyboard Icon + Title & TCP Target | Port/Target Pill | Close 'X'
+            // Header: Keyboard Icon + Title & TV Status | Close 'X'
             Row(
                 verticalAlignment = Alignment.CenterVertically,
                 modifier = Modifier.fillMaxWidth()
@@ -155,71 +121,28 @@ fun KeyboardInputSheet(
                     imageVector = Icons.Rounded.Keyboard,
                     contentDescription = null,
                     tint = TextPrimary,
-                    modifier = Modifier.size(22.dp)
+                    modifier = Modifier.size(24.dp)
                 )
-                Spacer(modifier = Modifier.width(10.dp))
+                Spacer(modifier = Modifier.width(12.dp))
                 Column(modifier = Modifier.weight(1f)) {
                     Text(
                         text = "키보드 입력",
                         style = MaterialTheme.typography.titleLarge,
                         color = TextPrimary
                     )
-                    val targetSourceLabel = when {
-                        hostOverride.isNotBlank() -> "직접 지정"
-                        !connectedTvHost.isNullOrBlank() -> "연결된 TV 자동"
-                        discoveredTextServers.isNotEmpty() -> "NSD 자동 탐색"
-                        else -> null
-                    }
-                    val statusText = if (!targetHost.isNullOrBlank()) {
-                        "TCP · $targetHost:$targetPort (${targetSourceLabel ?: "자동"})"
+                    val statusText = if (isTvImeVisible) {
+                        "TV 입력창 감지됨 · 한글/영문 지원"
                     } else {
-                        "TV를 연결하거나 대상 IP를 설정하세요"
+                        "$tvName · TV 검색창을 열면 자동 연결됩니다"
                     }
                     Text(
                         text = statusText,
                         style = MaterialTheme.typography.labelSmall,
-                        fontFamily = if (!targetHost.isNullOrBlank()) MonoFontFamily else MaterialTheme.typography.labelSmall.fontFamily,
-                        color = if (!targetHost.isNullOrBlank()) MintGreen else WarningAmber,
+                        color = if (isTvImeVisible) MintGreen else TextSecondary,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis
                     )
                 }
-
-                Surface(
-                    color = if (showTargetEditor) MintGreenContainer else CharcoalSurface,
-                    shape = CircleShape,
-                    modifier = Modifier
-                        .height(36.dp)
-                        .clip(CircleShape)
-                        .border(
-                            1.dp,
-                            if (showTargetEditor) MintGreen.copy(alpha = 0.6f) else CharcoalBorder,
-                            CircleShape
-                        )
-                        .clickable { showTargetEditor = !showTargetEditor }
-                        .testTag("keyboard_tcp_target_toggle")
-                ) {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        modifier = Modifier.padding(horizontal = 12.dp)
-                    ) {
-                        Icon(
-                            imageVector = Icons.Rounded.Tune,
-                            contentDescription = "TCP 대상 설정",
-                            tint = if (showTargetEditor) MintGreen else TextSecondary,
-                            modifier = Modifier.size(14.dp)
-                        )
-                        Spacer(modifier = Modifier.width(5.dp))
-                        Text(
-                            text = ":$targetPort",
-                            style = MaterialTheme.typography.labelSmall,
-                            fontFamily = MonoFontFamily,
-                            color = if (showTargetEditor) MintGreen else TextPrimary
-                        )
-                    }
-                }
-
-                Spacer(modifier = Modifier.width(8.dp))
 
                 Box(
                     modifier = Modifier
@@ -241,244 +164,12 @@ fun KeyboardInputSheet(
                 }
             }
 
-            // Collapsible TCP Target IP, Port & NSD Server Selector
-            AnimatedVisibility(visible = showTargetEditor) {
-                Surface(
-                    color = CharcoalSurface,
-                    shape = RoundedCornerShape(18.dp),
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(top = 12.dp)
-                        .border(1.dp, CharcoalBorder, RoundedCornerShape(18.dp))
-                ) {
-                    Column(
-                        verticalArrangement = Arrangement.spacedBy(10.dp),
-                        modifier = Modifier.padding(14.dp)
-                    ) {
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            modifier = Modifier.fillMaxWidth()
-                        ) {
-                            Text(
-                                text = "TCP 소켓 전송 대상",
-                                style = MaterialTheme.typography.labelLarge,
-                                color = TextPrimary,
-                                modifier = Modifier.weight(1f)
-                            )
-                            Surface(
-                                color = CharcoalWell,
-                                shape = CircleShape,
-                                modifier = Modifier
-                                    .clip(CircleShape)
-                                    .border(1.dp, CharcoalBorder, CircleShape)
-                                    .clickable(onClick = onRefreshTextServers)
-                                    .testTag("refresh_nsd_text_servers_button")
-                            ) {
-                                Row(
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp)
-                                ) {
-                                    Icon(
-                                        imageVector = Icons.Rounded.Refresh,
-                                        contentDescription = "NSD 다시 검색",
-                                        tint = if (isScanningTextServers) MintGreen else TextSecondary,
-                                        modifier = Modifier.size(14.dp)
-                                    )
-                                    Spacer(modifier = Modifier.width(4.dp))
-                                    Text(
-                                        text = if (isScanningTextServers) "NSD 검색중" else "NSD 검색",
-                                        style = MaterialTheme.typography.labelSmall,
-                                        color = if (isScanningTextServers) MintGreen else TextSecondary
-                                    )
-                                }
-                            }
-                        }
-
-                        if (!connectedTvHost.isNullOrBlank() || discoveredTextServers.isNotEmpty()) {
-                            FlowRow(
-                                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                                verticalArrangement = Arrangement.spacedBy(8.dp)
-                            ) {
-                                if (!connectedTvHost.isNullOrBlank()) {
-                                    val isUsingConnected = hostOverride.isBlank()
-                                    Surface(
-                                        color = if (isUsingConnected) MintGreenContainer else CharcoalWell,
-                                        shape = CircleShape,
-                                        modifier = Modifier
-                                            .clip(CircleShape)
-                                            .border(
-                                                1.dp,
-                                                if (isUsingConnected) MintGreen.copy(alpha = 0.6f) else CharcoalBorder,
-                                                CircleShape
-                                            )
-                                            .clickable {
-                                                draftHost = ""
-                                                val parsedPort = draftPort.toIntOrNull()
-                                                    ?.takeIf { TvTextSocketClient.isValidPort(it) }
-                                                    ?: targetPort
-                                                targetInputError = null
-                                                onUpdateTcpTarget("", parsedPort)
-                                            }
-                                    ) {
-                                        Text(
-                                            text = "연결된 TV ($connectedTvHost)",
-                                            style = MaterialTheme.typography.labelSmall,
-                                            fontFamily = MonoFontFamily,
-                                            color = if (isUsingConnected) MintGreen else TextPrimary,
-                                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp)
-                                        )
-                                    }
-                                }
-
-                                discoveredTextServers.forEach { server ->
-                                    val selected = targetHost == server.host && targetPort == server.port
-                                    Surface(
-                                        color = if (selected) MintGreenContainer else CharcoalWell,
-                                        shape = CircleShape,
-                                        modifier = Modifier
-                                            .clip(CircleShape)
-                                            .border(
-                                                1.dp,
-                                                if (selected) MintGreen.copy(alpha = 0.6f) else CharcoalBorder,
-                                                CircleShape
-                                            )
-                                            .clickable {
-                                                val overrideValue = if (server.host == connectedTvHost) "" else server.host
-                                                draftHost = overrideValue
-                                                draftPort = server.port.toString()
-                                                targetInputError = null
-                                                onUpdateTcpTarget(overrideValue, server.port)
-                                            }
-                                    ) {
-                                        Text(
-                                            text = "${server.serviceName} (${server.host}:${server.port})",
-                                            style = MaterialTheme.typography.labelSmall,
-                                            fontFamily = MonoFontFamily,
-                                            color = if (selected) MintGreen else TextPrimary,
-                                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp)
-                                        )
-                                    }
-                                }
-                            }
-                        }
-
-                        Row(
-                            horizontalArrangement = Arrangement.spacedBy(8.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                            modifier = Modifier.fillMaxWidth()
-                        ) {
-                            OutlinedTextField(
-                                value = draftHost,
-                                onValueChange = {
-                                    draftHost = it
-                                    targetInputError = null
-                                },
-                                label = { Text("TV IP (비우면 자동)") },
-                                placeholder = {
-                                    Text(
-                                        text = connectedTvHost ?: "192.168.0.15",
-                                        fontFamily = MonoFontFamily
-                                    )
-                                },
-                                singleLine = true,
-                                textStyle = MaterialTheme.typography.bodyMedium.copy(fontFamily = MonoFontFamily),
-                                keyboardOptions = KeyboardOptions(
-                                    keyboardType = KeyboardType.Uri,
-                                    imeAction = ImeAction.Next
-                                ),
-                                colors = OutlinedTextFieldDefaults.colors(
-                                    focusedContainerColor = CharcoalWell,
-                                    unfocusedContainerColor = CharcoalWell,
-                                    focusedBorderColor = MintGreen,
-                                    unfocusedBorderColor = CharcoalBorder,
-                                    focusedTextColor = TextPrimary,
-                                    unfocusedTextColor = TextPrimary
-                                ),
-                                shape = RoundedCornerShape(14.dp),
-                                modifier = Modifier
-                                    .weight(1.4f)
-                                    .testTag("tcp_override_host_input")
-                            )
-
-                            OutlinedTextField(
-                                value = draftPort,
-                                onValueChange = { raw ->
-                                    if (raw.length <= 5 && raw.all { it.isDigit() }) {
-                                        draftPort = raw
-                                        targetInputError = null
-                                    }
-                                },
-                                label = { Text("포트") },
-                                placeholder = { Text("8080", fontFamily = MonoFontFamily) },
-                                singleLine = true,
-                                textStyle = MaterialTheme.typography.bodyMedium.copy(fontFamily = MonoFontFamily),
-                                keyboardOptions = KeyboardOptions(
-                                    keyboardType = KeyboardType.Number,
-                                    imeAction = ImeAction.Done
-                                ),
-                                colors = OutlinedTextFieldDefaults.colors(
-                                    focusedContainerColor = CharcoalWell,
-                                    unfocusedContainerColor = CharcoalWell,
-                                    focusedBorderColor = MintGreen,
-                                    unfocusedBorderColor = CharcoalBorder,
-                                    focusedTextColor = TextPrimary,
-                                    unfocusedTextColor = TextPrimary
-                                ),
-                                shape = RoundedCornerShape(14.dp),
-                                modifier = Modifier
-                                    .weight(0.8f)
-                                    .testTag("tcp_port_input")
-                            )
-                        }
-
-                        if (!targetInputError.isNullOrBlank()) {
-                            Text(
-                                text = targetInputError.orEmpty(),
-                                style = MaterialTheme.typography.bodySmall,
-                                color = ErrorCoral
-                            )
-                        }
-
-                        Row(
-                            horizontalArrangement = Arrangement.End,
-                            modifier = Modifier.fillMaxWidth()
-                        ) {
-                            Button(
-                                onClick = {
-                                    val parsedPort = draftPort.toIntOrNull()
-                                    if (parsedPort == null || !TvTextSocketClient.isValidPort(parsedPort)) {
-                                        targetInputError = "포트는 1~65535 사이 숫자로 입력해 주세요."
-                                    } else {
-                                        targetInputError = null
-                                        onUpdateTcpTarget(draftHost.trim(), parsedPort)
-                                        showTargetEditor = false
-                                    }
-                                },
-                                colors = ButtonDefaults.buttonColors(
-                                    containerColor = MintGreen,
-                                    contentColor = OnMintGreen
-                                ),
-                                shape = CircleShape,
-                                modifier = Modifier
-                                    .height(40.dp)
-                                    .testTag("tcp_target_apply_button")
-                            ) {
-                                Text("적용", fontWeight = FontWeight.Bold)
-                            }
-                        }
-                    }
-                }
-            }
-
-            Spacer(modifier = Modifier.height(14.dp))
+            Spacer(modifier = Modifier.height(16.dp))
 
             OutlinedTextField(
                 value = fieldValue,
                 onValueChange = { next ->
                     fieldValue = next
-                    if (textSendState !is TextSendState.Idle) {
-                        onClearStatus()
-                    }
                 },
                 modifier = Modifier
                     .fillMaxWidth()
@@ -496,7 +187,7 @@ fun KeyboardInputSheet(
                 colors = OutlinedTextFieldDefaults.colors(
                     focusedContainerColor = CharcoalWell,
                     unfocusedContainerColor = CharcoalWell,
-                    focusedBorderColor = CharcoalBorder,
+                    focusedBorderColor = MintGreen,
                     unfocusedBorderColor = CharcoalBorder,
                     focusedTextColor = TextPrimary,
                     unfocusedTextColor = TextPrimary,
@@ -510,69 +201,6 @@ fun KeyboardInputSheet(
                     onSend = { submitCurrentText() }
                 )
             )
-
-            // Inline send feedback banner
-            when (textSendState) {
-                is TextSendState.Sending -> {
-                    Spacer(modifier = Modifier.height(10.dp))
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        CircularProgressIndicator(
-                            color = MintGreen,
-                            strokeWidth = 2.dp,
-                            modifier = Modifier.size(14.dp)
-                        )
-                        Text(
-                            text = "${textSendState.targetHost}:${textSendState.targetPort} 으로 전송 중...",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = TextSecondary
-                        )
-                    }
-                }
-                is TextSendState.Success -> {
-                    Spacer(modifier = Modifier.height(10.dp))
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(6.dp)
-                    ) {
-                        Icon(
-                            imageVector = Icons.Rounded.CheckCircle,
-                            contentDescription = null,
-                            tint = MintGreen,
-                            modifier = Modifier.size(16.dp)
-                        )
-                        Text(
-                            text = "전송 완료 · \"${textSendState.sentText}\" + 엔터",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MintGreen,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis
-                        )
-                    }
-                }
-                is TextSendState.Error -> {
-                    Spacer(modifier = Modifier.height(10.dp))
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(6.dp)
-                    ) {
-                        Icon(
-                            imageVector = Icons.Rounded.ErrorOutline,
-                            contentDescription = null,
-                            tint = ErrorCoral,
-                            modifier = Modifier.size(16.dp)
-                        )
-                        Text(
-                            text = textSendState.message,
-                            style = MaterialTheme.typography.bodySmall,
-                            color = ErrorCoral
-                        )
-                    }
-                }
-                TextSendState.Idle -> Unit
-            }
 
             Spacer(modifier = Modifier.height(16.dp))
 
@@ -589,9 +217,8 @@ fun KeyboardInputSheet(
                         .height(52.dp)
                         .clip(CircleShape)
                         .border(1.dp, CharcoalBorder, CircleShape)
-                        .clickable(enabled = !isSending) {
+                        .clickable {
                             fieldValue = TextFieldValue("")
-                            onClearStatus()
                         }
                         .testTag("keyboard_clear_button")
                 ) {
@@ -614,7 +241,7 @@ fun KeyboardInputSheet(
                     }
                 }
 
-                val canSend = fieldValue.text.trim().isNotEmpty() && !isSending
+                val canSend = fieldValue.text.trim().isNotEmpty()
                 Button(
                     onClick = { submitCurrentText() },
                     enabled = canSend,
@@ -630,22 +257,14 @@ fun KeyboardInputSheet(
                         .height(52.dp)
                         .testTag("keyboard_send_search_button")
                 ) {
-                    if (isSending) {
-                        CircularProgressIndicator(
-                            color = MintGreen,
-                            strokeWidth = 2.dp,
-                            modifier = Modifier.size(18.dp)
-                        )
-                    } else {
-                        Icon(
-                            imageVector = Icons.AutoMirrored.Rounded.Send,
-                            contentDescription = null,
-                            modifier = Modifier.size(18.dp)
-                        )
-                    }
+                    Icon(
+                        imageVector = Icons.AutoMirrored.Rounded.Send,
+                        contentDescription = null,
+                        modifier = Modifier.size(18.dp)
+                    )
                     Spacer(modifier = Modifier.width(8.dp))
                     Text(
-                        text = if (isSending) "전송 중" else "전송",
+                        text = "전송",
                         style = MaterialTheme.typography.labelLarge,
                         fontWeight = FontWeight.Bold
                     )

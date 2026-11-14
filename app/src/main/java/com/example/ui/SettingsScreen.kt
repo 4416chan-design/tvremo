@@ -66,7 +66,6 @@ import com.example.data.local.PairedTvEntity
 import com.example.data.local.RecentTvAppEntity
 import com.example.data.model.TvAppCatalog
 import com.example.data.model.TvAppCatalogItem
-import com.example.network.TvTextSocketClient
 import com.example.ui.components.TvAppBadgeIcon
 import com.example.ui.theme.CharcoalBg
 import com.example.ui.theme.CharcoalBorder
@@ -99,8 +98,7 @@ fun SettingsScreen(
     onConnectSavedTv: (PairedTvEntity) -> Unit,
     onForgetTv: (String) -> Unit,
     onToggleHaptic: (Boolean) -> Unit,
-    onToggleAutoKeyboard: (Boolean) -> Unit,
-    onSaveTextSocketConfig: (port: Int, hostOverride: String) -> Unit = { _, _ -> }
+    onToggleAutoKeyboard: (Boolean) -> Unit
 ) {
     var showAddCustomAppDialog by remember { mutableStateOf(false) }
 
@@ -482,7 +480,7 @@ fun SettingsScreen(
                             ) {
                                 Column(modifier = Modifier.weight(1f)) {
                                     Text("TV 입력창 자동 키보드 열기", style = MaterialTheme.typography.titleSmall, color = TextPrimary)
-                                    Text("TV에서 입력창이 감지되면 TCP 텍스트 전송 시트 자동 표시", style = MaterialTheme.typography.bodySmall, color = TextSecondary)
+                                    Text("TV에서 검색·입력창이 감지되면 키보드 입력 시트 자동 표시", style = MaterialTheme.typography.bodySmall, color = TextSecondary)
                                 }
                                 Switch(
                                     checked = preferences.autoShowKeyboard,
@@ -497,22 +495,7 @@ fun SettingsScreen(
                     }
                 }
 
-                // 5. TCP Socket Text Input Settings
-                item {
-                    Spacer(modifier = Modifier.height(8.dp))
-                    SectionHeader(
-                        title = "TCP 텍스트 전송 설정",
-                        subtitle = "연결된 TV IP로 UTF-8 텍스트와 엔터를 직접 전송합니다 (기본 포트 8080)"
-                    )
-                }
 
-                item {
-                    TcpSocketConfigCard(
-                        savedPort = preferences.textSocketPort,
-                        savedHostOverride = preferences.textSocketHostOverride,
-                        onSave = onSaveTextSocketConfig
-                    )
-                }
             }
         }
     }
@@ -528,116 +511,7 @@ fun SettingsScreen(
     }
 }
 
-@Composable
-private fun TcpSocketConfigCard(
-    savedPort: Int,
-    savedHostOverride: String,
-    onSave: (port: Int, hostOverride: String) -> Unit
-) {
-    var hostDraft by remember(savedHostOverride) { mutableStateOf(savedHostOverride) }
-    var portDraft by remember(savedPort) { mutableStateOf(savedPort.toString()) }
-    var errorMessage by remember { mutableStateOf<String?>(null) }
 
-    Surface(
-        color = CharcoalSurface,
-        shape = RoundedCornerShape(20.dp),
-        modifier = Modifier
-            .fillMaxWidth()
-            .border(1.dp, CharcoalBorder, RoundedCornerShape(20.dp))
-    ) {
-        Column(
-            verticalArrangement = Arrangement.spacedBy(10.dp),
-            modifier = Modifier.padding(16.dp)
-        ) {
-            Row(
-                horizontalArrangement = Arrangement.spacedBy(10.dp),
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                OutlinedTextField(
-                    value = hostDraft,
-                    onValueChange = {
-                        hostDraft = it
-                        errorMessage = null
-                    },
-                    label = { Text("대상 TV IP (선택)") },
-                    placeholder = { Text("비우면 연결된 TV IP 사용", fontFamily = MonoFontFamily) },
-                    singleLine = true,
-                    textStyle = MaterialTheme.typography.bodyMedium.copy(fontFamily = MonoFontFamily),
-                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri),
-                    modifier = Modifier
-                        .weight(1.4f)
-                        .testTag("settings_tcp_host_input")
-                )
-
-                OutlinedTextField(
-                    value = portDraft,
-                    onValueChange = { raw ->
-                        if (raw.length <= 5 && raw.all { it.isDigit() }) {
-                            portDraft = raw
-                            errorMessage = null
-                        }
-                    },
-                    label = { Text("TCP 포트") },
-                    placeholder = { Text("8080", fontFamily = MonoFontFamily) },
-                    singleLine = true,
-                    textStyle = MaterialTheme.typography.bodyMedium.copy(fontFamily = MonoFontFamily),
-                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                    modifier = Modifier
-                        .weight(0.8f)
-                        .testTag("settings_tcp_port_input")
-                )
-            }
-
-            if (!errorMessage.isNullOrBlank()) {
-                Text(
-                    text = errorMessage.orEmpty(),
-                    style = MaterialTheme.typography.bodySmall,
-                    color = ErrorCoral
-                )
-            }
-
-            Row(
-                horizontalArrangement = Arrangement.End,
-                verticalAlignment = Alignment.CenterVertically,
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                TextButton(
-                    onClick = {
-                        hostDraft = ""
-                        portDraft = TvTextSocketClient.DEFAULT_TEXT_PORT.toString()
-                        errorMessage = null
-                        onSave(TvTextSocketClient.DEFAULT_TEXT_PORT, "")
-                    },
-                    modifier = Modifier.testTag("settings_tcp_reset_button")
-                ) {
-                    Text("기본값 (8080)", color = TextSecondary)
-                }
-
-                Spacer(modifier = Modifier.width(8.dp))
-
-                Button(
-                    onClick = {
-                        val parsed = portDraft.toIntOrNull()
-                        if (parsed == null || !TvTextSocketClient.isValidPort(parsed)) {
-                            errorMessage = "포트는 1~65535 범위의 숫자로 입력해 주세요."
-                        } else {
-                            errorMessage = null
-                            onSave(parsed, hostDraft.trim())
-                        }
-                    },
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = MintGreen,
-                        contentColor = OnMintGreen
-                    ),
-                    shape = CircleShape,
-                    modifier = Modifier.testTag("settings_tcp_save_button")
-                ) {
-                    Text("저장", fontWeight = FontWeight.Bold)
-                }
-            }
-        }
-    }
-}
 
 @Composable
 private fun SectionHeader(title: String, subtitle: String) {

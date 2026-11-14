@@ -8,9 +8,7 @@ import com.example.data.local.FavoriteAppEntity
 import com.example.data.local.PairedTvEntity
 import com.example.data.local.RecentTvAppEntity
 import com.example.data.local.TvRemoteRepository
-import com.example.data.model.DiscoveredTextServer
 import com.example.data.model.DiscoveredTv
-import com.example.data.model.TextSendState
 import com.example.data.model.TvAppCatalog
 import com.example.data.model.TvAppCatalogItem
 import com.example.data.model.TvConnectionState
@@ -23,7 +21,6 @@ import com.example.network.AndroidTvRemoteClient
 import com.example.network.ClientCertStore
 import com.example.network.NetworkAdbClient
 import com.example.network.TvDiscoveryManager
-import com.example.network.TvTextSocketClient
 import com.example.network.TvVoiceStreamer
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Job
@@ -51,8 +48,7 @@ class RemoteViewModel(
     private val repository: TvRemoteRepository,
     private val certStore: ClientCertStore,
     private val discoveryManager: TvDiscoveryManager,
-    private val adbClient: NetworkAdbClient,
-    private val textSocketClient: TvTextSocketClient = TvTextSocketClient()
+    private val adbClient: NetworkAdbClient
 ) : ViewModel() {
 
     private val _connectionState = MutableStateFlow<TvConnectionState>(TvConnectionState.Disconnected)
@@ -62,9 +58,7 @@ class RemoteViewModel(
     val adbStatusDetail: StateFlow<String?> = adbClient.adbStatusDetail
 
     val discoveredTvs: StateFlow<List<DiscoveredTv>> = discoveryManager.discoveredTvs
-    val discoveredTextServers: StateFlow<List<DiscoveredTextServer>> = discoveryManager.discoveredTextServers
     val isScanning: StateFlow<Boolean> = discoveryManager.isScanning
-    val isScanningTextServers: StateFlow<Boolean> = discoveryManager.isScanningTextServers
     val scanError: StateFlow<String?> = discoveryManager.scanError
 
     val pairedTvs: StateFlow<List<PairedTvEntity>> = repository.pairedTvs.stateIn(
@@ -114,9 +108,6 @@ class RemoteViewModel(
 
     private val _snackbarNotice = MutableStateFlow<SnackbarNotice?>(null)
     val snackbarNotice: StateFlow<SnackbarNotice?> = _snackbarNotice.asStateFlow()
-
-    private val _textSendState = MutableStateFlow<TextSendState>(TextSendState.Idle)
-    val textSendState: StateFlow<TextSendState> = _textSendState.asStateFlow()
 
     private var lastAutoReconnectAttemptMs: Long = 0L
     private var lastLocalVolumeAdjustMs: Long = 0L
@@ -621,91 +612,37 @@ class RemoteViewModel(
     }
 
     fun openKeyboardSheet() {
-        _textSendState.value = TextSendState.Idle
+        if (!ensureConnectedOrPrompt()) return
         _isKeyboardSheetVisible.value = true
-        discoveryManager.startTextServerDiscovery()
-    }
-
-    fun refreshTextServerDiscovery() {
-        discoveryManager.startTextServerDiscovery()
     }
 
     fun dismissKeyboardSheet() {
         _isKeyboardSheetVisible.value = false
-        _textSendState.value = TextSendState.Idle
-        if (!_isTvPickerVisible.value) {
-            discoveryManager.stopTextServerDiscovery()
-        }
     }
 
-    fun clearTextSendState() {
-        _textSendState.value = TextSendState.Idle
-    }
+    /**
+     * Sends UTF-8 text to TV IME via RemoteImeBatchEdit and triggers Enter.
+     * Follows the kud/androidtv-remote architecture.
+     */
+    fun sendKeyboardText(text: String, submitWithEnter: Boolean = true) {
+        if (!ensureConnectedOrPrompt()) return
+        val cleanText = text.trim()
+        if (cleanText.isEmpty()) return
 
-    fun resolveTextSocketTarget(): Pair<String?, Int> {
-        val prefs = preferences.value
-        val overrideHost = prefs.textSocketHostOverride.trim()
-        val connectedHost = (_connectionState.value as? TvConnectionState.Connected)?.host
-        val nsdServer = discoveredTextServers.value.firstOrNull()
-
-        val targetHost = when {
-            overrideHost.isNotBlank() -> overrideHost
-            !connectedHost.isNullOrBlank() -> connectedHost
-            nsdServer != null -> nsdServer.host
-            else -> null
-        }
-        val configuredPort = prefs.textSocketPort
-        val targetPort = when {
-            overrideHost.isBlank() && connectedHost.isNullOrBlank() && nsdServer != null -> nsdServer.port
-            TvTextSocketClient.isValidPort(configuredPort) -> configuredPort
-            else -> TvTextSocketClient.DEFAULT_TEXT_PORT
-        }
-        return targetHost to targetPort
-    }
-
-    fun sendTcpText(text: String) {
         viewModelScope.launch {
-            sendTcpTextInternal(text = text, showToastOnSuccess = true)
-        }
-    }
-
-    private suspend fun sendTcpTextInternal(text: String, showToastOnSuccess: Boolean): Boolean {
-        val (targetHost, targetPort) = resolveTextSocketTarget()
-        if (targetHost.isNullOrBlank()) {
-            val msg = "전송할 TV IP가 없습니다. 상단에서 TV를 연결하거나 대상 IP를 입력해 주세요."
-            _textSendState.value = TextSendState.Error(msg)
-            showMessage(msg)
-            return false
-        }
-
-        val sanitized = TvTextSocketClient.sanitizeLineText(text)
-        if (sanitized.isEmpty()) {
-            val msg = "전송할 텍스트를 입력해 주세요."
-            _textSendState.value = TextSendState.Error(msg)
-            return false
-        }
-
-        _textSendState.value = TextSendState.Sending(targetHost, targetPort)
-        val result = textSocketClient.sendText(
-            host = targetHost,
-            port = targetPort,
-            text = sanitized
-        )
-        return if (result.isSuccess) {
-            _textSendState.value = TextSendState.Success(
-                sentText = result.getOrDefault(sanitized),
-                targetHost = targetHost,
-                targetPort = targetPort
-            )
-            if (showToastOnSuccess) {
-                showMessage("전송 완료 ($targetHost:$targetPort)")
+            val result = runCatching {
+                remoteClient.sendText(
+                    text = cleanText,
+                    replaceExisting = true,
+                    submitWithEnter = submitWithEnter
+                )
             }
-            true
-        } else {
-            val errMsg = result.exceptionOrNull()?.message ?: "TV 연결 실패"
-            _textSendState.value = TextSendState.Error(errMsg)
-            showMessage(errMsg)
-            false
+            if (result.isSuccess) {
+                showMessage("TV로 전송 완료")
+            } else {
+                val err = result.exceptionOrNull()?.message ?: "TV 연결 오류"
+                showMessage("전송 실패: $err")
+            }
         }
     }
 
@@ -813,19 +750,20 @@ class RemoteViewModel(
     fun onVoiceSearchRecognized(spokenText: String) {
         _isVoiceListening.value = false
         if (spokenText.isBlank()) return
+        if (!ensureConnectedOrPrompt()) return
         viewModelScope.launch {
             runCatching {
-                val (targetHost, _) = resolveTextSocketTarget()
-                if (targetHost.isNullOrBlank() && remoteClient.isConnected) {
+                val imeAlreadyActive = remoteClient.isImeFieldActive || _imePromptState.value.isTvImeVisible
+                if (!imeAlreadyActive) {
                     remoteClient.sendKey(TvKeyCodes.SEARCH, AndroidTvRemoteClient.DIRECTION_SHORT)
+                    awaitTvImeField(3_000L)
                 }
-                val sent = sendTcpTextInternal(
+                remoteClient.sendText(
                     text = spokenText,
-                    showToastOnSuccess = false
+                    replaceExisting = true,
+                    submitWithEnter = true
                 )
-                if (sent) {
-                    showMessage("\"$spokenText\" TCP 음성 검색 전송")
-                }
+                showMessage("\"$spokenText\" 음성 검색 전송")
             }.onFailure {
                 showMessage("음성 검색 전송 실패: ${it.message}")
             }
@@ -1018,26 +956,7 @@ class RemoteViewModel(
         }
     }
 
-    fun setTextSocketConfig(port: Int, hostOverride: String) {
-        if (!TvTextSocketClient.isValidPort(port)) {
-            showMessage("포트 번호는 1~65535 사이여야 합니다.")
-            return
-        }
-        val cleanHost = hostOverride.trim()
-        val current = preferences.value
-        viewModelScope.launch {
-            repository.updatePreferences(
-                hapticEnabled = current.hapticEnabled,
-                autoShowKeyboard = current.autoShowKeyboard,
-                brightnessPercent = current.brightnessPercent,
-                textSocketPort = port,
-                textSocketHostOverride = cleanHost
-            )
-            _textSendState.value = TextSendState.Idle
-            val targetLabel = if (cleanHost.isNotBlank()) "$cleanHost:$port" else "연결된 TV:$port"
-            showMessage("TCP 텍스트 전송 대상 저장: $targetLabel")
-        }
-    }
+
 
     fun clearSnackbar() {
         _snackbarNotice.value = null
@@ -1070,8 +989,7 @@ class RemoteViewModel(
         private val repository: TvRemoteRepository,
         private val certStore: ClientCertStore,
         private val discoveryManager: TvDiscoveryManager,
-        private val adbClient: NetworkAdbClient,
-        private val textSocketClient: TvTextSocketClient = TvTextSocketClient()
+        private val adbClient: NetworkAdbClient
     ) : ViewModelProvider.Factory {
         @Suppress("UNCHECKED_CAST")
         override fun <T : ViewModel> create(modelClass: Class<T>): T {
@@ -1079,8 +997,7 @@ class RemoteViewModel(
                 repository = repository,
                 certStore = certStore,
                 discoveryManager = discoveryManager,
-                adbClient = adbClient,
-                textSocketClient = textSocketClient
+                adbClient = adbClient
             ) as T
         }
     }

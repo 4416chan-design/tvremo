@@ -368,21 +368,24 @@ class AndroidTvRemoteClient(
 
     /**
      * Sends UTF-8 text (Korean Hangul & English) to TV IME via RemoteImeBatchEdit.
-     * Matches the reference Android TV Remote v2 client (androidtvremote2):
-     * insert = 1, value = full resulting field text, start = end = cursor (len - 1),
-     * ime_counter/field_counter = latest values reported by the TV (not incremented locally).
+     * Matches the reference Android TV Remote v2 protocol (kud/androidtv-remote):
+     * insert = 1, value = full resulting field text, start = end = cursor (text.length),
+     * using the active ime_counter and field_counter from TV IME sessions.
      */
-    suspend fun sendText(text: String, replaceExisting: Boolean = false, submitWithEnter: Boolean = false) {
+    suspend fun sendText(text: String, replaceExisting: Boolean = true, submitWithEnter: Boolean = false) {
         imeMutex.withLock {
+            val trimmed = text.trim()
+            if (trimmed.isEmpty()) return@withLock
             val currentLength = trackedTvText.length
             val startPos = if (replaceExisting) 0 else trackedSelStart.coerceIn(0, currentLength)
             val endPos = if (replaceExisting) currentLength else trackedSelEnd.coerceIn(startPos, currentLength)
-            val newText = applyTextEdit(trackedTvText, startPos, endPos, text)
+            val newText = applyTextEdit(trackedTvText, startPos, endPos, trimmed)
 
             val payload = buildImeBatchEditPayload(
                 imeCounter = imeCounter,
                 fieldCounter = fieldCounter,
-                text = newText
+                text = newText,
+                cursor = newText.length
             )
             sendRaw(payload)
             trackedTvText = newText
@@ -390,7 +393,7 @@ class AndroidTvRemoteClient(
             trackedSelEnd = newText.length
 
             if (submitWithEnter) {
-                kotlinx.coroutines.delay(150)
+                kotlinx.coroutines.delay(120)
                 sendKey(TvKeyCodes.ENTER, DIRECTION_SHORT)
             }
         }
@@ -458,14 +461,14 @@ class AndroidTvRemoteClient(
         }
 
         /**
-         * @param text full resulting text of the TV field (not a delta)
-         * @param cursor cursor index reported to the TV; defaults to reference value len - 1 (min 0)
+         * @param text full resulting text of the TV field
+         * @param cursor cursor index reported to the TV; defaults to text.length
          */
         fun buildImeBatchEditPayload(
             imeCounter: Int,
             fieldCounter: Int,
             text: String,
-            cursor: Int = (text.length - 1).coerceAtLeast(0),
+            cursor: Int = text.length,
             insert: Int = 1
         ): ByteArray = ProtobufWire.encode {
             writeMessageField(21) { // remote_ime_batch_edit

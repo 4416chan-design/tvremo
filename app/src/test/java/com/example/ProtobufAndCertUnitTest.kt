@@ -147,7 +147,7 @@ class ProtobufAndCertUnitTest {
     }
 
     @Test
-    fun `ime batch edit payload uses insert one full text and cursor at len minus one`() {
+    fun `ime batch edit payload uses insert one full text and cursor at text length`() {
         val payload = com.example.network.AndroidTvRemoteClient.buildImeBatchEditPayload(
             imeCounter = 5,
             fieldCounter = 3,
@@ -162,8 +162,8 @@ class ProtobufAndCertUnitTest {
         assertEquals(1L, editInfo.first { it.number == 1 }.varint)
 
         val imeObj = editInfo.first { it.number == 2 }.asMessage()
-        assertEquals(5L, imeObj.first { it.number == 1 }.varint)
-        assertEquals(5L, imeObj.first { it.number == 2 }.varint)
+        assertEquals(6L, imeObj.first { it.number == 1 }.varint)
+        assertEquals(6L, imeObj.first { it.number == 2 }.varint)
         assertEquals("유튜브 검색", imeObj.first { it.number == 3 }.asString())
     }
 
@@ -279,62 +279,26 @@ class ProtobufAndCertUnitTest {
     }
 
     @Test
-    fun `tcp text socket client transmits UTF-8 Korean text and newline to ServerSocket`() {
-        val server = java.net.ServerSocket(0)
-        val port = server.localPort
-        val received = java.util.concurrent.CompletableFuture<String?>()
-
-        val serverThread = Thread {
-            server.use { ss ->
-                ss.accept().use { client ->
-                    val reader = java.io.BufferedReader(
-                        java.io.InputStreamReader(client.getInputStream(), Charsets.UTF_8)
-                    )
-                    received.complete(reader.readLine())
-                }
-            }
-        }.apply { start() }
-
-        val client = com.example.network.TvTextSocketClient()
-        val result = kotlinx.coroutines.runBlocking {
-            client.sendText(
-                host = "127.0.0.1",
-                port = port,
-                text = "유튜브 오징어 게임\n시즌2"
-            )
-        }
-        serverThread.join(2_000)
-
-        assertTrue(result.isSuccess)
-        assertEquals("유튜브 오징어 게임 시즌2", result.getOrNull())
-        assertEquals("유튜브 오징어 게임 시즌2", received.get(2, java.util.concurrent.TimeUnit.SECONDS))
-    }
-
-    @Test
-    fun `tcp text socket client validates host port and handles connection refused`() {
-        assertEquals(true, com.example.network.TvTextSocketClient.isValidPort(8080))
-        assertEquals(false, com.example.network.TvTextSocketClient.isValidPort(0))
-        assertEquals(false, com.example.network.TvTextSocketClient.isValidPort(70000))
-        assertEquals(
-            "첫째줄 둘째줄",
-            com.example.network.TvTextSocketClient.sanitizeLineText("  첫째줄\r\n둘째줄  ")
+    fun `android tv remote client ime batch edit encodes valid protobuf matching kud androidtv-remote`() {
+        val koreanText = "손흥민 하이라이트"
+        val payload = com.example.network.AndroidTvRemoteClient.buildImeBatchEditPayload(
+            imeCounter = 1,
+            fieldCounter = 2,
+            text = koreanText,
+            cursor = koreanText.length
         )
+        val fields = ProtobufWire.parseFields(payload)
+        val batchEdit = fields.first { it.number == 21 }.asMessage()
+        assertEquals(1L, batchEdit.first { it.number == 1 }.varint)
+        assertEquals(2L, batchEdit.first { it.number == 2 }.varint)
 
-        val client = com.example.network.TvTextSocketClient()
-        kotlinx.coroutines.runBlocking {
-            val blankHostRes = client.sendText(host = "  ", port = 8080, text = "안녕")
-            assertTrue(blankHostRes.isFailure)
+        val editInfo = batchEdit.first { it.number == 3 }.asMessage()
+        assertEquals(1L, editInfo.first { it.number == 1 }.varint)
 
-            val badPortRes = client.sendText(host = "127.0.0.1", port = 0, text = "안녕")
-            assertTrue(badPortRes.isFailure)
-
-            val blankTextRes = client.sendText(host = "127.0.0.1", port = 8080, text = " \n ")
-            assertTrue(blankTextRes.isFailure)
-
-            val closedPort = java.net.ServerSocket(0).use { it.localPort }
-            val refusedRes = client.sendText(host = "127.0.0.1", port = closedPort, text = "테스트")
-            assertTrue(refusedRes.isFailure)
-        }
+        val imeObj = editInfo.first { it.number == 2 }.asMessage()
+        assertEquals(koreanText.length.toLong(), imeObj.first { it.number == 1 }.varint)
+        assertEquals(koreanText.length.toLong(), imeObj.first { it.number == 2 }.varint)
+        assertEquals(koreanText, imeObj.first { it.number == 3 }.asString())
     }
 
     @Test

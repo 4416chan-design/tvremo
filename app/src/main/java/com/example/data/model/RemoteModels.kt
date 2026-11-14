@@ -30,19 +30,6 @@ sealed class TvConnectionState {
     data class Error(val message: String, val host: String? = null) : TvConnectionState()
 }
 
-data class DiscoveredTextServer(
-    val serviceName: String,
-    val host: String,
-    val port: Int = 8080
-)
-
-sealed class TextSendState {
-    data object Idle : TextSendState()
-    data class Sending(val targetHost: String, val targetPort: Int) : TextSendState()
-    data class Success(val sentText: String, val targetHost: String, val targetPort: Int) : TextSendState()
-    data class Error(val message: String) : TextSendState()
-}
-
 data class TvImePromptState(
     val isTvImeVisible: Boolean = false,
     val currentText: String = "",
