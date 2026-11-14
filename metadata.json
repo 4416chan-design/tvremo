@@ -1,0 +1,6 @@
+{
+  "name": "TV 리모컨",
+  "description": "같은 Wi-Fi 네트워크의 Android TV를 mDNS로 검색·페어링하여 제어하는 스마트 TV 리모컨 앱",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

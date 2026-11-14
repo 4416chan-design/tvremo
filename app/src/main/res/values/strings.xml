@@ -1,0 +1,22 @@
+<resources>
+    <string name="app_name">TV 리모컨</string>
+    <string name="tv_select_needed">미연결</string>
+    <string name="cd_search_tv">Wi-Fi TV 검색 및 연결</string>
+    <string name="cd_disconnect_tv">TV 연결 해제</string>
+    <string name="cd_power">TV 전원</string>
+    <string name="cd_dpad_up">위</string>
+    <string name="cd_dpad_down">아래</string>
+    <string name="cd_dpad_left">왼쪽</string>
+    <string name="cd_dpad_right">오른쪽</string>
+    <string name="cd_dpad_ok">선택</string>
+    <string name="btn_keyboard">키보드</string>
+    <string name="btn_home">홈</string>
+    <string name="btn_back">뒤로가기</string>
+    <string name="btn_mic">마이크</string>
+    <string name="btn_apps">Apps</string>
+    <string name="btn_settings">TV 설정</string>
+    <string name="cd_mute">음소거</string>
+    <string name="cd_favorites_edit">즐겨찾기 편집</string>
+    <string name="add_favorite_chip">즐겨찾기 추가</string>
+    <string name="settings_title">TV 즐겨찾기</string>
+</resources>
