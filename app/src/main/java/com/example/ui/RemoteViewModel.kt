@@ -613,6 +613,13 @@ class RemoteViewModel(
 
     fun openKeyboardSheet() {
         if (!ensureConnectedOrPrompt()) return
+        val currentText = remoteClient.currentTrackedText
+        _imePromptState.update {
+            it.copy(
+                isTvImeVisible = remoteClient.isImeFieldActive,
+                currentText = currentText
+            )
+        }
         _isKeyboardSheetVisible.value = true
     }
 
@@ -620,25 +627,57 @@ class RemoteViewModel(
         _isKeyboardSheetVisible.value = false
     }
 
+    fun refreshTvInputText(): String {
+        val currentText = remoteClient.currentTrackedText
+        _imePromptState.update {
+            it.copy(
+                isTvImeVisible = remoteClient.isImeFieldActive,
+                currentText = currentText
+            )
+        }
+        return currentText
+    }
+
+    fun sendEnterKey() {
+        if (!ensureConnectedOrPrompt()) return
+        viewModelScope.launch {
+            runCatching {
+                remoteClient.sendKey(TvKeyCodes.ENTER, AndroidTvRemoteClient.DIRECTION_SHORT)
+            }.onFailure { showMessage("엔터 전송 실패: ${it.message}") }
+        }
+    }
+
     /**
-     * Sends UTF-8 text to TV IME via RemoteImeBatchEdit and triggers Enter.
+     * Sends UTF-8 text to TV IME via RemoteImeBatchEdit and optionally triggers Enter after delay.
      * Follows the kud/androidtv-remote architecture.
      */
-    fun sendKeyboardText(text: String, submitWithEnter: Boolean = true) {
+    fun sendKeyboardText(
+        text: String,
+        submitWithEnter: Boolean = true,
+        customDelayMs: Long? = null
+    ) {
         if (!ensureConnectedOrPrompt()) return
         val cleanText = text.trim()
         if (cleanText.isEmpty()) return
+
+        val enterDelay = customDelayMs ?: preferences.value.imeEnterDelayMs
 
         viewModelScope.launch {
             val result = runCatching {
                 remoteClient.sendText(
                     text = cleanText,
                     replaceExisting = true,
-                    submitWithEnter = submitWithEnter
+                    submitWithEnter = submitWithEnter,
+                    enterDelayMs = enterDelay
                 )
             }
             if (result.isSuccess) {
-                showMessage("TV로 전송 완료")
+                if (submitWithEnter) {
+                    val secFormatted = String.format(java.util.Locale.US, "%.1f", enterDelay / 1000.0)
+                    showMessage("TV로 전송 완료 (${secFormatted}초 후 엔터)")
+                } else {
+                    showMessage("TV로 텍스트 덮어쓰기 완료")
+                }
             } else {
                 val err = result.exceptionOrNull()?.message ?: "TV 연결 오류"
                 showMessage("전송 실패: $err")
@@ -924,6 +963,7 @@ class RemoteViewModel(
                 hapticEnabled = current.hapticEnabled,
                 autoShowKeyboard = current.autoShowKeyboard,
                 brightnessPercent = clamped,
+                imeEnterDelayMs = current.imeEnterDelayMs,
                 textSocketPort = current.textSocketPort,
                 textSocketHostOverride = current.textSocketHostOverride
             )
@@ -937,6 +977,7 @@ class RemoteViewModel(
                 hapticEnabled = enabled,
                 autoShowKeyboard = current.autoShowKeyboard,
                 brightnessPercent = current.brightnessPercent,
+                imeEnterDelayMs = current.imeEnterDelayMs,
                 textSocketPort = current.textSocketPort,
                 textSocketHostOverride = current.textSocketHostOverride
             )
@@ -950,6 +991,22 @@ class RemoteViewModel(
                 hapticEnabled = current.hapticEnabled,
                 autoShowKeyboard = enabled,
                 brightnessPercent = current.brightnessPercent,
+                imeEnterDelayMs = current.imeEnterDelayMs,
+                textSocketPort = current.textSocketPort,
+                textSocketHostOverride = current.textSocketHostOverride
+            )
+        }
+    }
+
+    fun setImeEnterDelayMs(delayMs: Long) {
+        val clamped = delayMs.coerceIn(0L, 10_000L)
+        val current = preferences.value
+        viewModelScope.launch {
+            repository.updatePreferences(
+                hapticEnabled = current.hapticEnabled,
+                autoShowKeyboard = current.autoShowKeyboard,
+                brightnessPercent = current.brightnessPercent,
+                imeEnterDelayMs = clamped,
                 textSocketPort = current.textSocketPort,
                 textSocketHostOverride = current.textSocketHostOverride
             )

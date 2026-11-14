@@ -6,6 +6,8 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -23,6 +25,9 @@ import androidx.compose.material.icons.automirrored.rounded.Backspace
 import androidx.compose.material.icons.automirrored.rounded.Send
 import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.Keyboard
+import androidx.compose.material.icons.rounded.KeyboardReturn
+import androidx.compose.material.icons.rounded.Refresh
+import androidx.compose.material.icons.rounded.Tv
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -38,6 +43,7 @@ import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -59,23 +65,30 @@ import com.example.ui.theme.CharcoalBorder
 import com.example.ui.theme.CharcoalSurface
 import com.example.ui.theme.CharcoalSurfaceElevated
 import com.example.ui.theme.CharcoalWell
+import com.example.ui.theme.DividerSubtle
 import com.example.ui.theme.MintGreen
+import com.example.ui.theme.MintGreenContainer
 import com.example.ui.theme.OnMintGreen
 import com.example.ui.theme.TextPrimary
 import com.example.ui.theme.TextSecondary
 
 /**
  * Native Android TV v2 remote text input sheet.
- * Transmits text directly to the TV's IME keyboard using the Android TV Remote v2 protocol
- * (RemoteImeBatchEdit, insert = 1, start/end cursor synchronization) based on kud/androidtv-remote.
+ * Synchronizes focused TV input text, allows full-field overwrite,
+ * and waits a configurable delay before transmitting ENTER so the TV
+ * input method has time to commit the text without prematurely closing.
  */
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
 fun KeyboardInputSheet(
     tvName: String,
     initialText: String = "",
     isTvImeVisible: Boolean = false,
-    onSendText: (String) -> Unit,
+    savedEnterDelayMs: Long = 1500L,
+    onSendText: (text: String, submitWithEnter: Boolean, enterDelayMs: Long) -> Unit,
+    onSendEnterOnly: () -> Unit,
+    onRefreshTvText: () -> Unit,
+    onSaveEnterDelay: (Long) -> Unit,
     onDismiss: () -> Unit
 ) {
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
@@ -85,16 +98,19 @@ fun KeyboardInputSheet(
         mutableStateOf(TextFieldValue(initialText, selection = TextRange(initialText.length)))
     }
 
+    var selectedDelayMs by remember(savedEnterDelayMs) {
+        mutableLongStateOf(savedEnterDelayMs)
+    }
+
     LaunchedEffect(Unit) {
         focusRequester.requestFocus()
     }
 
-    fun submitCurrentText() {
+    fun submitText(withEnter: Boolean) {
         val committed = fieldValue.text.trim()
         if (committed.isEmpty()) return
         fieldValue = fieldValue.copy(composition = null)
-        onSendText(committed)
-        fieldValue = TextFieldValue("", selection = TextRange(0))
+        onSendText(committed, withEnter, selectedDelayMs)
         onDismiss()
     }
 
@@ -164,8 +180,90 @@ fun KeyboardInputSheet(
                 }
             }
 
-            Spacer(modifier = Modifier.height(16.dp))
+            Spacer(modifier = Modifier.height(14.dp))
 
+            // TV Current Focused Input Synchronizer Banner
+            Surface(
+                color = CharcoalSurface,
+                shape = RoundedCornerShape(16.dp),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .border(1.dp, CharcoalBorder, RoundedCornerShape(16.dp))
+            ) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Rounded.Tv,
+                        contentDescription = null,
+                        tint = if (initialText.isNotBlank()) MintGreen else TextSecondary,
+                        modifier = Modifier.size(18.dp)
+                    )
+                    Spacer(modifier = Modifier.width(10.dp))
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = "TV 포커스된 입력창 내용",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = TextSecondary
+                        )
+                        val displayTvText = initialText.ifBlank { "(비어있음)" }
+                        Text(
+                            text = displayTvText,
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = if (initialText.isNotBlank()) TextPrimary else TextSecondary.copy(alpha = 0.6f),
+                            fontWeight = if (initialText.isNotBlank()) FontWeight.SemiBold else FontWeight.Normal,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    }
+
+                    if (initialText.isNotBlank()) {
+                        Surface(
+                            color = MintGreenContainer,
+                            shape = CircleShape,
+                            modifier = Modifier
+                                .clip(CircleShape)
+                                .border(1.dp, MintGreen.copy(alpha = 0.6f), CircleShape)
+                                .clickable {
+                                    fieldValue = TextFieldValue(initialText, selection = TextRange(initialText.length))
+                                }
+                                .testTag("keyboard_copy_tv_text_button")
+                        ) {
+                            Text(
+                                text = "가져오기",
+                                style = MaterialTheme.typography.labelSmall,
+                                fontWeight = FontWeight.Bold,
+                                color = MintGreen,
+                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp)
+                            )
+                        }
+                        Spacer(modifier = Modifier.width(6.dp))
+                    }
+
+                    Box(
+                        modifier = Modifier
+                            .size(34.dp)
+                            .clip(CircleShape)
+                            .background(CharcoalWell)
+                            .border(1.dp, CharcoalBorder, CircleShape)
+                            .clickable(onClick = onRefreshTvText)
+                            .testTag("keyboard_refresh_tv_text_button"),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            imageVector = Icons.Rounded.Refresh,
+                            contentDescription = "TV 텍스트 새로고침",
+                            tint = TextSecondary,
+                            modifier = Modifier.size(16.dp)
+                        )
+                    }
+                }
+            }
+
+            Spacer(modifier = Modifier.height(14.dp))
+
+            // Mobile Editable Text Field
             OutlinedTextField(
                 value = fieldValue,
                 onValueChange = { next ->
@@ -173,16 +271,16 @@ fun KeyboardInputSheet(
                 },
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(132.dp)
+                    .height(124.dp)
                     .focusRequester(focusRequester)
                     .testTag("tv_keyboard_input_field"),
                 placeholder = {
                     Text(
-                        text = "$tvName 에 전송할 한글·영문 텍스트를 입력하세요...",
+                        text = "$tvName 에 덮어쓸 텍스트 입력 (한글·영문)",
                         color = TextSecondary
                     )
                 },
-                maxLines = 5,
+                maxLines = 4,
                 shape = RoundedCornerShape(18.dp),
                 colors = OutlinedTextFieldDefaults.colors(
                     focusedContainerColor = CharcoalWell,
@@ -195,18 +293,84 @@ fun KeyboardInputSheet(
                 ),
                 keyboardOptions = KeyboardOptions(
                     keyboardType = KeyboardType.Text,
-                    imeAction = ImeAction.Send
+                    imeAction = if (selectedDelayMs > 0) ImeAction.Send else ImeAction.Done
                 ),
                 keyboardActions = KeyboardActions(
-                    onSend = { submitCurrentText() }
+                    onSend = { submitText(withEnter = selectedDelayMs > 0) },
+                    onDone = { submitText(withEnter = false) }
                 )
             )
 
+            Spacer(modifier = Modifier.height(12.dp))
+
+            // Enter Delay Selector (Prevents TV IME from closing before text is committed)
+            Column(modifier = Modifier.fillMaxWidth()) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Text(
+                        text = "전송 후 엔터키 대기 시간",
+                        style = MaterialTheme.typography.labelMedium,
+                        color = TextPrimary
+                    )
+                    Spacer(modifier = Modifier.weight(1f))
+                    Text(
+                        text = if (selectedDelayMs > 0) "${selectedDelayMs / 1000.0}초 후 엔터" else "엔터 안 함",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = if (selectedDelayMs > 0) MintGreen else TextSecondary
+                    )
+                }
+                Spacer(modifier = Modifier.height(6.dp))
+
+                val delayOptions = listOf(
+                    1000L to "1.0초",
+                    1500L to "1.5초 (권장)",
+                    2000L to "2.0초",
+                    3000L to "3.0초",
+                    0L to "엔터 없음"
+                )
+
+                FlowRow(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    delayOptions.forEach { (delayMs, label) ->
+                        val isSelected = selectedDelayMs == delayMs
+                        Surface(
+                            color = if (isSelected) MintGreenContainer else CharcoalSurface,
+                            shape = CircleShape,
+                            modifier = Modifier
+                                .clip(CircleShape)
+                                .border(
+                                    1.dp,
+                                    if (isSelected) MintGreen.copy(alpha = 0.6f) else DividerSubtle,
+                                    CircleShape
+                                )
+                                .clickable {
+                                    selectedDelayMs = delayMs
+                                    onSaveEnterDelay(delayMs)
+                                }
+                                .testTag("delay_option_${delayMs}")
+                        ) {
+                            Text(
+                                text = label,
+                                style = MaterialTheme.typography.labelSmall,
+                                fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
+                                color = if (isSelected) MintGreen else TextSecondary,
+                                modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp)
+                            )
+                        }
+                    }
+                }
+            }
+
             Spacer(modifier = Modifier.height(16.dp))
 
-            // Bottom Full Bullnose Pill Buttons: 전체 지우기 | 전송
+            // Secondary Buttons: 전체 지우기 | 텍스트만 덮어쓰기 | TV 엔터
             Row(
-                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
                 modifier = Modifier.fillMaxWidth()
             ) {
                 Surface(
@@ -214,12 +378,10 @@ fun KeyboardInputSheet(
                     shape = CircleShape,
                     modifier = Modifier
                         .weight(1f)
-                        .height(52.dp)
+                        .height(44.dp)
                         .clip(CircleShape)
                         .border(1.dp, CharcoalBorder, CircleShape)
-                        .clickable {
-                            fieldValue = TextFieldValue("")
-                        }
+                        .clickable { fieldValue = TextFieldValue("") }
                         .testTag("keyboard_clear_button")
                 ) {
                     Row(
@@ -230,45 +392,111 @@ fun KeyboardInputSheet(
                             imageVector = Icons.AutoMirrored.Rounded.Backspace,
                             contentDescription = null,
                             tint = TextSecondary,
-                            modifier = Modifier.size(18.dp)
+                            modifier = Modifier.size(16.dp)
                         )
-                        Spacer(modifier = Modifier.width(8.dp))
+                        Spacer(modifier = Modifier.width(6.dp))
                         Text(
-                            text = "전체 지우기",
-                            style = MaterialTheme.typography.labelLarge,
+                            text = "지우기",
+                            style = MaterialTheme.typography.labelMedium,
                             color = TextSecondary
                         )
                     }
                 }
 
                 val canSend = fieldValue.text.trim().isNotEmpty()
-                Button(
-                    onClick = { submitCurrentText() },
-                    enabled = canSend,
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = if (canSend) MintGreen else CharcoalSurfaceElevated,
-                        contentColor = if (canSend) OnMintGreen else TextPrimary,
-                        disabledContainerColor = CharcoalSurfaceElevated,
-                        disabledContentColor = TextSecondary
-                    ),
+                Surface(
+                    color = CharcoalSurface,
+                    shape = CircleShape,
+                    modifier = Modifier
+                        .weight(1.3f)
+                        .height(44.dp)
+                        .clip(CircleShape)
+                        .border(1.dp, if (canSend) MintGreen.copy(alpha = 0.4f) else CharcoalBorder, CircleShape)
+                        .clickable(enabled = canSend) { submitText(withEnter = false) }
+                        .testTag("keyboard_send_text_only_button")
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.Center
+                    ) {
+                        Text(
+                            text = "텍스트만 덮어쓰기",
+                            style = MaterialTheme.typography.labelMedium,
+                            color = if (canSend) TextPrimary else TextSecondary.copy(alpha = 0.4f)
+                        )
+                    }
+                }
+
+                Surface(
+                    color = CharcoalSurface,
                     shape = CircleShape,
                     modifier = Modifier
                         .weight(1f)
-                        .height(52.dp)
-                        .testTag("keyboard_send_search_button")
+                        .height(44.dp)
+                        .clip(CircleShape)
+                        .border(1.dp, CharcoalBorder, CircleShape)
+                        .clickable(onClick = {
+                            onSendEnterOnly()
+                            onDismiss()
+                        })
+                        .testTag("keyboard_send_enter_only_button")
                 ) {
-                    Icon(
-                        imageVector = Icons.AutoMirrored.Rounded.Send,
-                        contentDescription = null,
-                        modifier = Modifier.size(18.dp)
-                    )
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Text(
-                        text = "전송",
-                        style = MaterialTheme.typography.labelLarge,
-                        fontWeight = FontWeight.Bold
-                    )
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.Center
+                    ) {
+                        Icon(
+                            imageVector = Icons.Rounded.KeyboardReturn,
+                            contentDescription = null,
+                            tint = TextSecondary,
+                            modifier = Modifier.size(16.dp)
+                        )
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text(
+                            text = "TV 엔터",
+                            style = MaterialTheme.typography.labelMedium,
+                            color = TextSecondary
+                        )
+                    }
                 }
+            }
+
+            Spacer(modifier = Modifier.height(10.dp))
+
+            // Primary Full Bullnose Pill Button: 전송 및 엔터
+            val canSendPrimary = fieldValue.text.trim().isNotEmpty()
+            val primaryLabel = if (selectedDelayMs > 0) {
+                "전송 및 엔터 (${selectedDelayMs / 1000.0}초 후)"
+            } else {
+                "전송 (엔터 없음)"
+            }
+
+            Button(
+                onClick = { submitText(withEnter = selectedDelayMs > 0) },
+                enabled = canSendPrimary,
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = if (canSendPrimary) MintGreen else CharcoalSurfaceElevated,
+                    contentColor = if (canSendPrimary) OnMintGreen else TextPrimary,
+                    disabledContainerColor = CharcoalSurfaceElevated,
+                    disabledContentColor = TextSecondary
+                ),
+                shape = CircleShape,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(52.dp)
+                    .testTag("keyboard_send_search_button")
+            ) {
+                Icon(
+                    imageVector = Icons.AutoMirrored.Rounded.Send,
+                    contentDescription = null,
+                    modifier = Modifier.size(18.dp)
+                )
+                Spacer(modifier = Modifier.width(8.dp))
+                Text(
+                    text = primaryLabel,
+                    style = MaterialTheme.typography.labelLarge,
+                    fontWeight = FontWeight.Bold
+                )
             }
         }
     }

@@ -170,6 +170,7 @@ class TvRemoteRepository(private val db: AppDatabase) {
         hapticEnabled: Boolean,
         autoShowKeyboard: Boolean,
         brightnessPercent: Int,
+        imeEnterDelayMs: Long = 1500L,
         textSocketPort: Int = 8080,
         textSocketHostOverride: String = ""
     ) {
@@ -179,6 +180,7 @@ class TvRemoteRepository(private val db: AppDatabase) {
                 hapticEnabled = hapticEnabled,
                 autoShowKeyboard = autoShowKeyboard,
                 brightnessPercent = brightnessPercent.coerceIn(5, 100),
+                imeEnterDelayMs = imeEnterDelayMs.coerceIn(0L, 10_000L),
                 textSocketPort = textSocketPort.coerceIn(1, 65535),
                 textSocketHostOverride = textSocketHostOverride.trim()
             )

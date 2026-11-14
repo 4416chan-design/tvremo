@@ -6,6 +6,8 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -98,7 +100,8 @@ fun SettingsScreen(
     onConnectSavedTv: (PairedTvEntity) -> Unit,
     onForgetTv: (String) -> Unit,
     onToggleHaptic: (Boolean) -> Unit,
-    onToggleAutoKeyboard: (Boolean) -> Unit
+    onToggleAutoKeyboard: (Boolean) -> Unit,
+    onSetImeEnterDelayMs: (Long) -> Unit = {}
 ) {
     var showAddCustomAppDialog by remember { mutableStateOf(false) }
 
@@ -490,6 +493,61 @@ fun SettingsScreen(
                                         checkedTrackColor = MintGreen
                                     )
                                 )
+                            }
+                            Spacer(modifier = Modifier.height(8.dp))
+                            Column(modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    modifier = Modifier.fillMaxWidth()
+                                ) {
+                                    Column(modifier = Modifier.weight(1f)) {
+                                        Text("키보드 전송 후 엔터 대기 시간", style = MaterialTheme.typography.titleSmall, color = TextPrimary)
+                                        Text("TV 화면에 텍스트가 덮어써진 후 엔터를 실행하기까지 대기합니다", style = MaterialTheme.typography.bodySmall, color = TextSecondary)
+                                    }
+                                    Text(
+                                        text = if (preferences.imeEnterDelayMs > 0) "${preferences.imeEnterDelayMs / 1000.0}초" else "엔터 없음",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = MintGreen
+                                    )
+                                }
+                                Spacer(modifier = Modifier.height(8.dp))
+                                val delayOptions = listOf(
+                                    1000L to "1.0초",
+                                    1500L to "1.5초 (권장)",
+                                    2000L to "2.0초",
+                                    3000L to "3.0초",
+                                    0L to "엔터 없음"
+                                )
+                                @OptIn(ExperimentalLayoutApi::class)
+                                FlowRow(
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                                ) {
+                                    delayOptions.forEach { (delayMs, label) ->
+                                        val isSelected = preferences.imeEnterDelayMs == delayMs
+                                        Surface(
+                                            color = if (isSelected) MintGreenContainer else CharcoalWell,
+                                            shape = CircleShape,
+                                            modifier = Modifier
+                                                .clip(CircleShape)
+                                                .border(
+                                                    1.dp,
+                                                    if (isSelected) MintGreen.copy(alpha = 0.6f) else CharcoalBorder,
+                                                    CircleShape
+                                                )
+                                                .clickable { onSetImeEnterDelayMs(delayMs) }
+                                                .testTag("settings_delay_${delayMs}")
+                                        ) {
+                                            Text(
+                                                text = label,
+                                                style = MaterialTheme.typography.labelSmall,
+                                                color = if (isSelected) MintGreen else TextSecondary,
+                                                fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
+                                                modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp)
+                                            )
+                                        }
+                                    }
+                                }
                             }
                         }
                     }

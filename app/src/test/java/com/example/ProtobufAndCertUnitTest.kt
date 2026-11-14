@@ -383,4 +383,50 @@ class ProtobufAndCertUnitTest {
         assertEquals("", client.debugTrackedText)
         assertEquals(0, client.debugImeCounter)
     }
+
+    @Test
+    fun `tv input text updates notify listener and currentTrackedText reflects TV focused query`() {
+        var lastReceivedText = ""
+        val client = com.example.network.AndroidTvRemoteClient(
+            certStore = null,
+            onForegroundAppChanged = {},
+            onImeShowRequested = { _, text -> lastReceivedText = text },
+            onVolumeChanged = { _, _, _ -> },
+            onDisconnected = {}
+        )
+
+        // TV sends show request with initial text "아이유 노래"
+        val showBytes = ProtobufWire.encode {
+            writeMessageField(22) {
+                writeMessageField(2) {
+                    writeVarintField(1, 1)
+                    writeStringField(2, "아이유 노래")
+                    writeVarintField(3, 6)
+                    writeVarintField(4, 6)
+                }
+            }
+        }
+        kotlinx.coroutines.runBlocking {
+            client.applyIncomingFieldsForTest(ProtobufWire.parseFields(showBytes))
+        }
+        assertEquals("아이유 노래", client.currentTrackedText)
+        assertEquals("아이유 노래", lastReceivedText)
+
+        // TV updates text on same field
+        val updatedBytes = ProtobufWire.encode {
+            writeMessageField(20) {
+                writeMessageField(2) {
+                    writeVarintField(1, 1)
+                    writeStringField(2, "아이유 밤편지")
+                    writeVarintField(3, 6)
+                    writeVarintField(4, 6)
+                }
+            }
+        }
+        kotlinx.coroutines.runBlocking {
+            client.applyIncomingFieldsForTest(ProtobufWire.parseFields(updatedBytes))
+        }
+        assertEquals("아이유 밤편지", client.currentTrackedText)
+        assertEquals("아이유 밤편지", lastReceivedText)
+    }
 }

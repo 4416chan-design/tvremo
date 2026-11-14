@@ -50,6 +50,7 @@ data class AppPreferencesEntity(
     val hapticEnabled: Boolean = true,
     val autoShowKeyboard: Boolean = true,
     val brightnessPercent: Int = 60,
+    val imeEnterDelayMs: Long = 1500L,
     val textSocketPort: Int = 8080,
     val textSocketHostOverride: String = ""
 )

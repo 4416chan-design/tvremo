@@ -76,6 +76,9 @@ class AndroidTvRemoteClient(
     internal val debugFieldCounter: Int
         get() = fieldCounter
 
+    val currentTrackedText: String
+        get() = trackedTvText
+
     internal val debugTrackedText: String
         get() = trackedTvText
 
@@ -205,16 +208,18 @@ class AndroidTvRemoteClient(
                     if (textStatus != null) {
                         val wasActive = isImeFieldActive
                         val prevFieldCounter = fieldCounter
+                        val prevText = trackedTvText
                         syncImeTextStatus(textStatus, isShowRequest = false)
-                        notifyImeActivationIfNeeded(wasActive, prevFieldCounter)
+                        notifyImeActivationIfNeeded(wasActive, prevFieldCounter, prevText)
                     }
                 }
                 21 -> { // remote_ime_batch_edit (TV echoes/acknowledges updated ime_counter, field_counter & text)
                     val batchFields = field.asMessage()
                     val wasActive = isImeFieldActive
                     val prevFieldCounter = fieldCounter
+                    val prevText = trackedTvText
                     syncIncomingImeBatchEdit(batchFields)
-                    notifyImeActivationIfNeeded(wasActive, prevFieldCounter)
+                    notifyImeActivationIfNeeded(wasActive, prevFieldCounter, prevText)
                 }
                 22 -> { // remote_ime_show_request
                     val showFields = field.asMessage()
@@ -258,8 +263,8 @@ class AndroidTvRemoteClient(
      * Some TVs/apps signal text-field focus only via RemoteImeKeyInject(20) or RemoteImeBatchEdit(21)
      * instead of RemoteImeShowRequest(22). Surface those activations to the UI as well.
      */
-    private fun notifyImeActivationIfNeeded(wasActive: Boolean, prevFieldCounter: Int) {
-        if (isImeFieldActive && (!wasActive || fieldCounter != prevFieldCounter)) {
+    private fun notifyImeActivationIfNeeded(wasActive: Boolean, prevFieldCounter: Int, prevText: String) {
+        if (isImeFieldActive && (!wasActive || fieldCounter != prevFieldCounter || trackedTvText != prevText)) {
             lastImeAppPackage = currentForegroundPackage
             onImeShowRequested(fieldCounter, trackedTvText)
         }
@@ -372,20 +377,29 @@ class AndroidTvRemoteClient(
      * insert = 1, value = full resulting field text, start = end = cursor (text.length),
      * using the active ime_counter and field_counter from TV IME sessions.
      */
-    suspend fun sendText(text: String, replaceExisting: Boolean = true, submitWithEnter: Boolean = false) {
+    suspend fun sendText(
+        text: String,
+        replaceExisting: Boolean = true,
+        submitWithEnter: Boolean = false,
+        enterDelayMs: Long = 1_500L
+    ) {
         imeMutex.withLock {
             val trimmed = text.trim()
             if (trimmed.isEmpty()) return@withLock
             val currentLength = trackedTvText.length
             val startPos = if (replaceExisting) 0 else trackedSelStart.coerceIn(0, currentLength)
             val endPos = if (replaceExisting) currentLength else trackedSelEnd.coerceIn(startPos, currentLength)
-            val newText = applyTextEdit(trackedTvText, startPos, endPos, trimmed)
+            val newText = if (replaceExisting) trimmed else applyTextEdit(trackedTvText, startPos, endPos, trimmed)
+
+            val nextCounter = if (imeCounter <= 0) 1 else imeCounter + 1
+            imeCounter = nextCounter
 
             val payload = buildImeBatchEditPayload(
-                imeCounter = imeCounter,
+                imeCounter = nextCounter,
                 fieldCounter = fieldCounter,
                 text = newText,
-                cursor = newText.length
+                cursor = newText.length,
+                insert = 1
             )
             sendRaw(payload)
             trackedTvText = newText
@@ -393,7 +407,8 @@ class AndroidTvRemoteClient(
             trackedSelEnd = newText.length
 
             if (submitWithEnter) {
-                kotlinx.coroutines.delay(120)
+                val delayTime = enterDelayMs.coerceIn(100L, 10_000L)
+                kotlinx.coroutines.delay(delayTime)
                 sendKey(TvKeyCodes.ENTER, DIRECTION_SHORT)
             }
         }

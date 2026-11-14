@@ -259,7 +259,8 @@ class MainActivity : ComponentActivity() {
                             },
                             onForgetTv = viewModel::forgetPairedTv,
                             onToggleHaptic = viewModel::setHapticEnabled,
-                            onToggleAutoKeyboard = viewModel::setAutoShowKeyboard
+                            onToggleAutoKeyboard = viewModel::setAutoShowKeyboard,
+                            onSetImeEnterDelayMs = viewModel::setImeEnterDelayMs
                         )
                     }
                 }
@@ -302,7 +303,13 @@ class MainActivity : ComponentActivity() {
                         tvName = tvName,
                         initialText = imePromptState.currentText,
                         isTvImeVisible = imePromptState.isTvImeVisible,
-                        onSendText = viewModel::sendKeyboardText,
+                        savedEnterDelayMs = preferences.imeEnterDelayMs,
+                        onSendText = { text, submitWithEnter, delayMs ->
+                            viewModel.sendKeyboardText(text, submitWithEnter, delayMs)
+                        },
+                        onSendEnterOnly = viewModel::sendEnterKey,
+                        onRefreshTvText = { viewModel.refreshTvInputText() },
+                        onSaveEnterDelay = viewModel::setImeEnterDelayMs,
                         onDismiss = viewModel::dismissKeyboardSheet
                     )
                 }
